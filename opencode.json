@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "docs/opencode.md",
+    "client/AGENTS.md",
+    "server/AGENTS.md",
+    "gameserver/AGENTS.md",
+    "game/AGENTS.md",
+    "sql/AGENTS.md"
+  ]
+}
