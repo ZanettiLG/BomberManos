@@ -36,8 +36,7 @@ Hoje, a pilha principal em funcionamento e `client + server`. Os diretorios `gam
 ### Requisitos
 
 - Node.js com npm
-- Docker ou Docker Compose para Redis
-- Postgres local com `psql`
+- Docker ou Docker Compose
 
 ### Instalar dependencias
 
@@ -45,75 +44,85 @@ Hoje, a pilha principal em funcionamento e `client + server`. Os diretorios `gam
 npm run install
 ```
 
-### Subir Redis
+### Subir Redis e Postgres
 
 ```bash
 docker compose up -d
 ```
 
-Observacao: o `docker-compose.yml` sobe apenas Redis Stack. Postgres continua sendo responsabilidade do ambiente local.
+O compose sobe Redis Stack e Postgres 16 Alpine. O schema do banco e inicializado automaticamente via `sql/constructor.sql`.
 
-### Criar o banco Postgres
-
-```bash
-psql -h localhost -U <usuario> -f sql/start.sql
-```
-
-### Variaveis importantes
-
-- `PORT`: porta base do servico. O projeto abre HTTP em `PORT` e HTTPS em `PORT + 1`.
-- `POSTGRES`: string de conexao usada pelos clientes SQL.
-
-Exemplo de valores usados no Gitpod:
+A conexao padrao do Postgres e:
 
 ```bash
-export PORT=3000
-export POSTGRES=postgres://gitpod@localhost/bombermanos
+postgres://postgres@localhost/bombermanos
 ```
+
+### Variaveis de ambiente
+
+Copie `.env.example` e ajuste:
+
+```bash
+cp .env.example .env
+```
+
+Variaveis:
+
+| Variavel | Padrao | Descricao |
+|----------|--------|-----------|
+| `PORT` | `3000` | Porta HTTP do `server` (HTTPS = PORT+1) |
+| `GAMESERVER_PORT` | `4000` | Porta HTTP do `gameserver` |
+| `POSTGRES` | — | String de conexao Postgres |
+| `SESSION_SECRET` | `jacareperneta` | Segredo da sessao (troque em producao) |
+| `CORS_ORIGINS` | — | Origins CORS separados por virgula |
 
 ## Fluxos de execucao
 
-### Fluxo mais alinhado ao repositorio atual
-
-1. Gere o frontend:
+### Dev mode completo — `npm run dev` (recomendado)
 
 ```bash
-npm --prefix client run build
+docker compose up -d
+npm run dev
 ```
 
-2. Suba o backend principal:
+Acesse **`http://localhost:3000`** — o server serve o client buildado.
+
+- Builda automaticamente client, server e gameserver
+- Depois mantem watch em todos (recompila ao salvar)
+- Se as portas `3000/3001/4000/4001` ja estiverem ocupadas, o comando falha cedo com aviso para evitar subir um stack quebrado
+- `gameserver` em `http://localhost:4000`
+
+Se precisar limpar uma sessao antiga de desenvolvimento, rode:
 
 ```bash
-PORT=3000 POSTGRES=postgres://gitpod@localhost/bombermanos npm --prefix server run dev
+npm run dev:stop
 ```
 
-3. Se precisar validar a extracao do backend de jogo:
+### Dev mode com Vite (HMR) — `npm run dev:vite`
 
 ```bash
-PORT=4000 POSTGRES=postgres://gitpod@localhost/bombermanos npm --prefix gameserver run dev
+docker compose up -d
+npm run dev:vite
 ```
 
-### Fluxo de frontend com Vite
+Acesse **`http://localhost:5173`** — Vite com HMR + proxy para o backend.
 
-```bash
-npm --prefix client run dev-vite
-```
-
-Importante:
-
-- `client/src/services/request.ts` usa URLs relativas e cookies same-origin.
-- `client/vite.config.ts` nao define proxy para o backend.
-- Se voce usar Vite em `5173`, talvez precise ajustar proxy/origem manualmente.
+- O Vite faz proxy de `/user`, `/match` e `/socket.io` para `localhost:3000`
+- Se as portas `3000/3001/4000/4001` ja estiverem ocupadas, o comando falha cedo com aviso
+- `localhost:3000` só tem as rotas HTTP e Socket.IO (sem frontend)
+- `gameserver` em `http://localhost:4000`
 
 ## Scripts principais
 
 | Escopo | Comando | Uso |
 | --- | --- | --- |
+| raiz | `docker compose up -d` | sobe Redis Stack e Postgres 16 Alpine |
 | raiz | `npm run install` | instala dependencias de `client`, `server` e `gameserver` |
 | raiz | `npm run start:login` | builda `client`, builda `server` e sobe o backend principal |
 | raiz | `npm run start:game` | builda e sobe `gameserver` |
-| raiz | `npm run dev` | atalho Windows-only; nao e portavel para Linux/macOS |
-| client | `npm run dev-vite` | sobe o servidor Vite |
+| raiz | `npm run dev` | server (3000), gameserver (4000) e client build em paralelo |
+| raiz | `npm run dev:vite` | Vite (5173) com proxy + server + gameserver em paralelo |
+| client | `npm run dev-vite` | sobe o servidor Vite com proxy para backend |
 | client | `npm run dev` | watch helper; nao sobe o Vite |
 | client | `npm run build` | build de producao do frontend |
 | server | `npm run dev` | watch TypeScript + restart do backend |
@@ -147,8 +156,9 @@ As escolhas acima seguem a documentacao oficial:
 
 ## Caveats importantes
 
-- O `server/` e o `gameserver/` usam a mesma porta padrao (`3000`) se `PORT` nao for definido.
-- O `server/` serve `../client/build`, entao o frontend precisa estar buildado para o fluxo integrado atual.
-- Existem certificados TLS de desenvolvimento em `server/src/security/` e `gameserver/src/security/`.
-- O schema SQL referencia `characters(id)`, mas a tabela nao e criada em `sql/constructor.sql`.
-- Existe um segredo fixo em `server/src/config/index.ts`; trate o projeto como ambiente de desenvolvimento e nao como setup pronto para producao.
+- `server` padrao porta 3000; `gameserver` padrao porta 4000 (agora sem conflito)
+- `server` serve `../client/build` — para HMR use `npm run dev:vite`
+- Certificados TLS de desenvolvimento versionados
+- Schema SQL referencia `characters(id)` sem a tabela existir
+- `SESSION_SECRET` tem fallback fixo (`jacareperneta`) — configure via `.env` em producao
+- Persistencia ativa e em arquivos JSON (`server/data/`), nao em Postgres

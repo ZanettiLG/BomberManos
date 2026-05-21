@@ -132,3 +132,4 @@ client/build/
 
 .opencode/git
 .opencode/**/*.json
+.opencode

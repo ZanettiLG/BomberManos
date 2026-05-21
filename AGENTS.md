@@ -42,6 +42,25 @@
 
 - `client/`: UI, fetch, socket client e renderer em canvas
 - `server/`: auth, sessao, matchmaking, Socket.IO e game loop atual
-- `gameserver/`: extracao futura do backend de jogo
-- `game/`: prototipo standalone do motor
+- `gameserver/`: extracao futura do backend de jogo (scaffold, handlers vazios)
+- `game/`: prototipo standalone do motor (WebSocket nativo, sem integracao)
 - `sql/`: bootstrap de banco e schema inicial
+
+## Conexoes entre apps
+
+```
+client ──HTTP relative──▶ server (PORT, padrao 3000)
+client ◀──Socket.IO────── server
+client (build) servido por server (static files)
+
+gameserver: sem conexao com client ou server (scaffold isolado)
+game: WebSocket nativo para porta 5000 (fora do projeto)
+```
+
+- `server` e `gameserver` competem pela porta 3000 por padrao; use `PORT=4000` no gameserver
+- `client` nunca referencia `gameserver`
+- `server` nunca referencia `gameserver`
+- Modelos duplicados entre `client/src/models/` e `server/src/models/` — sem pacote shared
+- Game loop ativo vive dentro de `server/src/services/game/data.ts`
+- Persistencia ativa: arquivos JSON em `server/data/`; Postgres no compose ainda nao e usado pelo runtime
+- `docs/architecture.md` tem o mapa completo de portas, eventos e endpoints

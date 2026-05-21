@@ -3,7 +3,8 @@
 ## Papel
 
 - Backend principal do projeto.
-- Serve o frontend buildado, expoe rotas HTTP e mantem o fluxo atual de Socket.IO e game loop.
+- Serve o frontend buildado (`../client/build`), expoe rotas HTTP e mantem o fluxo atual de Socket.IO e game loop.
+- **Nao se conecta ao `gameserver/`.** O game loop vive dentro deste pacote.
 
 ## Padrao de codigo
 

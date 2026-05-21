@@ -1,8 +1,9 @@
+import path from "path";
 import certs from "./certs";
 import matchConfig from "./match";
 import * as dotenv from "dotenv";
 
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 const initialPort = parseInt(process.env.PORT || "3000");
 
 const ports = {
@@ -14,7 +15,7 @@ const postgres = process.env.POSTGRES;
 
 const security = {
     saltRounds:10,
-    secret:"jacareperneta"
+    secret: process.env.SESSION_SECRET || "jacareperneta"
 };
 
 const sessionConfig = {

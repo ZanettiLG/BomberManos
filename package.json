@@ -11,7 +11,11 @@
     "dev:client": "cd client && npm run dev",
     "dev:login": "cd server && npm run dev",
     "dev:game": "cd gameserver && npm run dev",
-    "dev": "start \"Client\" npm run dev:client && start \"LoginServer\" npm run dev:login && start \"GameServer\" npm run dev:game",
+    "dev:build": "npm --prefix server run build && npm --prefix gameserver run build",
+    "dev:check-ports": "node ./scripts/check-dev-ports.js",
+    "dev:stop": "node ./scripts/stop-dev-processes.js",
+    "dev": "npm run dev:check-ports && npm --prefix client run build && npm run dev:build && concurrently -n client,server,gameserver -c cyan,yellow,magenta \"npm run dev:client\" \"npm run dev:login\" \"npm run dev:game\"",
+    "dev:vite": "npm run dev:check-ports && npm run dev:build && concurrently -n vite,server,gameserver -c cyan,yellow,magenta \"npm --prefix client run dev-vite\" \"npm run dev:login\" \"npm run dev:game\"",
     "start:game": "cd gameserver && npm run build && npm run start",
     "start:login": "cd client && npm run build && cd ../server && npm run build && npm run start"
   },
@@ -25,7 +29,7 @@
     "url": "https://github.com/LuisGustavoCZP/BomberManos/issues"
   },
   "homepage": "https://github.com/LuisGustavoCZP/BomberManos#readme",
-  "dependencies": {
-    
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   }
 }

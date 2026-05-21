@@ -8,7 +8,7 @@
     "start": "node build/index.js",
     "copy-security": "copyfiles ./src/security/* ./build",
     "copy-data": "copyfiles ./src/data/* ./build",
-    "dev": "concurrently \"npx tsc --watch\" \"npm run copy-security\" \"npm run copy-data\" \"nodemon -q build/index.js\""
+    "dev": "npx tsc && npm run copy-security && npm run copy-data && concurrently -k \"npx tsc --watch\" \"nodemon -q build/index.js\""
   },
   "repository": {
     "type": "git",

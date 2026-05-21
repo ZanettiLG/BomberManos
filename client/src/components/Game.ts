@@ -18,6 +18,8 @@ export class Game
         this.mapCanvas.className = className;
         gamediv.appendChild(this.mapCanvas);
 		this.mapContext = this.mapCanvas.getContext('2d') as CanvasRenderingContext2D;
+        this.gameCicle = this.gameCicle.bind(this);
+        this.handleKeyDown = this.handleKeyDown.bind(this);
         this.socket = gameData.socket;
         this.data = gameData.data;
         this.user = gameData.user;
@@ -28,6 +30,40 @@ export class Game
     {
         this.mapContext.fillStyle = type.color;
         this.mapContext.fillRect(x*46, y*46, 46, 46);
+    }
+
+    private handleKeyDown (e : KeyboardEvent)
+    {
+        const map = this.data.map;
+        const player = this.data.players[0];
+        if (!player || !player.position) return;
+
+        let tx = player.position.x;
+        let ty = player.position.y;
+
+        switch (e.key) {
+            case 'ArrowUp':
+            case 'w':
+                ty -= 1;
+                break;
+            case 'ArrowDown':
+            case 's':
+                ty += 1;
+                break;
+            case 'ArrowLeft':
+            case 'a':
+                tx -= 1;
+                break;
+            case 'ArrowRight':
+            case 'd':
+                tx += 1;
+                break;
+            default:
+                return;
+        }
+
+        e.preventDefault();
+        this.socket.emit('player-move' as any, { x: tx / map.width, y: ty / map.height });
     }
 
     private gameCicle ()
@@ -69,13 +105,9 @@ export class Game
 				console.log('update', data);
 				this.data = data;
 			});
-	
-			/* mapCanvas.addEventListener('click', (e) => 
-			{
-				const point = {x:e.offsetX/mapCanvas.clientWidth, y:e.offsetY/mapCanvas.clientHeight};
-				socket.emit('player-move' as any, point);
-				console.log('Clicou', point);
-			}); */
+
+			document.addEventListener('keydown', this.handleKeyDown);
+			
 			const input = new GameInputHandler(this.mapCanvas);
 			
 			requestAnimationFrame(this.gameCicle);

@@ -1,8 +1,9 @@
+import path from "path";
 import certs from "./certs";
 import * as dotenv from "dotenv";
 
-dotenv.config();
-const initialPort = parseInt(process.env.PORT || "3000");
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+const initialPort = parseInt(process.env.PORT || "4000");
 
 const ports = {
     http:initialPort,

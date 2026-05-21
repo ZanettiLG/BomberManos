@@ -4,45 +4,50 @@
 
 - Node.js com npm
 - Docker ou Docker Compose
-- Postgres local com `psql`
+
+## Mapa de portas
+
+| Servico | Porta | Descricao |
+|---------|-------|-----------|
+| `server` HTTP | `PORT` (padrao 3000) | Backend principal |
+| `server` HTTPS | `PORT + 1` (padrao 3001) | TLS dev |
+| `gameserver` HTTP | `PORT` (padrao 4000) | Scaffold — sem conflito |
+| `gameserver` HTTPS | `PORT + 1` (padrao 4001) | TLS dev |
+| `client` Vite | 5173 | Dev server com proxy para backend |
+| Redis | 6379 | Docker Compose |
+| Redis Insight | 8001 | Docker Compose |
+| Postgres | 5432 | Docker Compose |
 
 ## Infra local
 
-### Redis
+### Docker Compose
 
-O arquivo `docker-compose.yml` sobe apenas Redis Stack:
+Sobe Redis Stack e Postgres 16 Alpine com init automatico do schema:
 
 ```bash
 docker compose up -d
 ```
 
-Portas expostas:
-
-- `6379`: Redis
-- `8001`: Redis Insight / Redis Stack UI
-
-### Postgres
-
-O bootstrap atual do banco e manual:
+Conexao padrao Postgres:
 
 ```bash
-psql -h localhost -U <usuario> -f sql/start.sql
-```
-
-O Gitpod usa:
-
-```bash
-postgres://gitpod@localhost/bombermanos
+postgres://postgres@localhost/bombermanos
 ```
 
 ## Variaveis de ambiente
 
-### `server/` e `gameserver/`
+Copie `.env.example` da raiz e ajuste:
 
-- `PORT`: porta base do servico
-- `POSTGRES`: string de conexao com Postgres
+```bash
+cp .env.example .env
+```
 
-Sem `PORT`, ambos tentam usar `3000`, o que causa conflito.
+| Variavel | Padrao | Onde afeta |
+|----------|--------|------------|
+| `PORT` | `3000` | `server` (HTTP) |
+| `POSTGRES` | — | `server` e `gameserver` |
+| `SESSION_SECRET` | `jacareperneta` | `server` — sessao |
+| `CORS_ORIGINS` | `localhost:3000,5173` | `server` e `gameserver` |
 
 ## Instalacao
 
@@ -62,44 +67,64 @@ npm --prefix gameserver install
 
 ## Como rodar
 
-### Backend principal com frontend buildado
+> Veja `docs/architecture.md` para o mapa completo de conexoes, eventos Socket.IO e endpoints HTTP.
 
-Este e o caminho mais proximo da integracao atual do projeto.
+### Dev mode completo — `npm run dev` (recomendado)
 
-1. Build do frontend:
+```bash
+docker compose up -d
+npm run dev
+```
+
+Acesse **`http://localhost:3000`** — o server serve o client buildado.
+
+- Builda client, server e gameserver automaticamente no inicio
+- Depois mantem watch em todos (recompila ao salvar)
+- Se as portas `3000/3001/4000/4001` ja estiverem ocupadas, o comando falha cedo com aviso
+- `gameserver` em `http://localhost:4000`
+
+Se uma sessao antiga ficar presa, limpe os processos do projeto com:
+
+```bash
+npm run dev:stop
+```
+
+### Dev mode com Vite (HMR) — `npm run dev:vite`
+
+```bash
+docker compose up -d
+npm run dev:vite
+```
+
+Acesse **`http://localhost:5173`** — Vite com HMR + proxy para o backend.
+
+- Proxy de `/user`, `/match` e `/socket.io` para `localhost:3000`
+- Se as portas `3000/3001/4000/4001` ja estiverem ocupadas, o comando falha cedo com aviso
+- `localhost:3000` so tem as rotas HTTP e Socket.IO (sem frontend)
+- `gameserver` em `http://localhost:4000`
+
+### Backend principal com frontend buildado (produção)
 
 ```bash
 npm --prefix client run build
+npm --prefix server run dev
 ```
 
-2. Backend principal:
-
-```bash
-PORT=3000 POSTGRES=postgres://gitpod@localhost/bombermanos npm --prefix server run dev
-```
-
-3. Acesse:
-
-- `http://localhost:3000`
-- `https://localhost:3001`
+Acesse `http://localhost:3000`.
 
 ### Backend de jogo em extracao
 
 ```bash
-PORT=4000 POSTGRES=postgres://gitpod@localhost/bombermanos npm --prefix gameserver run dev
+PORT=4000 npm --prefix gameserver run dev
 ```
 
-### Frontend com Vite
+### Frontend com Vite (standalone)
 
 ```bash
 npm --prefix client run dev-vite
 ```
 
-Use este modo apenas sabendo que:
-
-- o frontend usa fetch com URLs relativas
-- o frontend usa cookies same-origin
-- nao existe proxy configurado no `vite.config.ts`
+Com proxy configurado, as chamadas para `/user`, `/match` e `/socket.io` sao redirecionadas ao backend.
 
 ## Scripts por area
 
@@ -108,17 +133,18 @@ Use este modo apenas sabendo que:
 - `npm run install`
 - `npm run start:login`
 - `npm run start:game`
-- `npm run dev` (Windows-only)
+- `npm run dev` — server (3000) + gameserver (4000) + client build
+- `npm run dev:vite` — Vite (5173) + server + gameserver
 
 ### `client/`
 
-- `npm run dev-vite`: servidor Vite
+- `npm run dev-vite`: servidor Vite com proxy
 - `npm run dev`: watch helper
 - `npm run build`: build de producao
 
 ### `server/`
 
-- `npm run dev`: compila em watch, copia certs e reinicia o processo
+- `npm run dev`: compila em watch, copia certs e reinicia
 - `npm run build`: compila TypeScript
 - `npm run start`: executa `build/index.js`
 
@@ -164,19 +190,12 @@ Se uma mudanca altera contratos entre frontend e backend, rode pelo menos os bui
 
 ## Caveats
 
-- `server/` serve `../client/build`, entao HMR nao faz parte do fluxo integrado atual.
-- `gameserver/` ainda nao possui fluxo real de Socket.IO implementado.
-- O backend atual usa bastante persistencia em arquivos locais (`server/data/`).
-- O schema SQL ainda tem desvio em relacao ao runtime atual.
-- Os certificados TLS atuais sao de desenvolvimento e estao no repositorio.
-
-## Gitpod
-
-O arquivo `.gitpod.yml` documenta o fluxo local mais fiel que existe hoje:
-
-- Redis em Docker
-- Postgres inicializado por `sql/start.sql`
-- stack principal em `PORT=3000`
-- stack de jogo em `PORT=4000`
-
-Se houver duvida sobre ordem de boot ou portas, use `.gitpod.yml` como referencia operacional.
+- `server/` serve `../client/build` — HMR so via `npm run dev:vite`
+- `gameserver/` e scaffold — handlers Socket.IO e rotas HTTP estao vazios
+- `server` (3000) e `gameserver` (4000) — sem conflito de porta
+- Persistencia ativa e em arquivos JSON (`server/data/`), nao em Postgres
+- `game/` e prototipo standalone, aponta para WebSocket em porta 5000 (fora do projeto)
+- Modelos de dados duplicados entre `client/` e `server/` — sem pacote shared
+- Eventos Socket.IO sao strings soltas com `as any`, sem contrato type-safe
+- Certificados TLS de desenvolvimento versionados
+- `SESSION_SECRET` tem fallback fixo — configure `.env` em producao

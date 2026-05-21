@@ -9,7 +9,9 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true}));
 const corsOptions : cors.CorsOptions = {
-    origin:["http://localhost:8000", "http://localhost:5173", "http://127.0.0.1:8000", "http://127.0.0.1:5173", "http://192.168.0.113:8000"],
+    origin: process.env.CORS_ORIGINS
+        ? process.env.CORS_ORIGINS.split(",")
+        : ["http://localhost:4000", "http://localhost:5173", "http://127.0.0.1:5173"],
     credentials:true,
 }
 app.use(cors(corsOptions));

@@ -1,17 +1,18 @@
 import fs from 'fs';
 import fsasync from 'fs/promises';
+import path from 'path';
 import { v4 } from 'uuid';
 
 class Database 
 {
-    private root = `./data`;
+    private root = path.resolve(__dirname, '../data');
     private data = new Map();
 
     constructor () 
     {
         if(!fs.existsSync(this.root))
         {
-            fs.mkdirSync(this.root)
+            fs.mkdirSync(this.root, { recursive: true })
         }
         const dataTables = fs.readdirSync(this.root);
         dataTables.forEach(dataTable => {
@@ -74,9 +75,9 @@ class Database
         const p = `${this.root}/${table}`;
         if(!fs.existsSync(p))
         {
-            fsasync.mkdir(p);
+            await fsasync.mkdir(p, { recursive: true });
         }
-        fsasync.writeFile(`${p}/${id}.json`, JSON.stringify(object, null, '\t'));
+        await fsasync.writeFile(`${p}/${id}.json`, JSON.stringify(object, null, '\t'));
         return object;
     }
 
@@ -95,9 +96,9 @@ class Database
         const p = `${this.root}/${table}`;
         if(!fs.existsSync(p))
         {
-            fsasync.mkdir(p);
+            await fsasync.mkdir(p, { recursive: true });
         }
-        fsasync.writeFile(`${p}/${id}.json`, JSON.stringify(obj, null, '\t'));
+        await fsasync.writeFile(`${p}/${id}.json`, JSON.stringify(obj, null, '\t'));
         return obj;
     }
 
@@ -109,7 +110,7 @@ class Database
             t.delete(id);
         }
         const p = `${this.root}/${table}`;
-        fsasync.rm(`${p}/${id}.json`);
+        await fsasync.rm(`${p}/${id}.json`, { force: true });
     }
 }
 

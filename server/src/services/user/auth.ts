@@ -1,5 +1,6 @@
 import { ExceptionTreatment } from "../../utils";
-import { APIResponse, SessionCookie } from "../../models";
+import Database from "../../database";
+import { APIResponse, Session, SessionCookie } from "../../models";
 import cookieService from "../cookies";
 
 async function auth (token : string) : Promise<APIResponse<SessionCookie>>
@@ -13,7 +14,8 @@ async function auth (token : string) : Promise<APIResponse<SessionCookie>>
 
         //console.log(token)
         const session = await cookieService.decodify(token);
-        if(session)
+        const persistedSession = await Database.get("sessions", session.data.sessionId) as Session;
+        if(session && persistedSession && persistedSession.user === session.data.userId)
         {
             return {
                 data:session.data,
@@ -21,7 +23,7 @@ async function auth (token : string) : Promise<APIResponse<SessionCookie>>
             } as APIResponse<SessionCookie>
         }
 
-        throw Error("404: Session can't be recovery");
+        throw Error("401: Session doesn't exist");
     }
     catch (e)
     {
