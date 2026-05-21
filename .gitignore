@@ -129,3 +129,6 @@ dist
 server/build/
 gameserver/build/
 client/build/
+
+.opencode/git
+.opencode/**/*.json
