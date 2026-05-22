@@ -1,35 +1,92 @@
 # BomberManos
 
-BomberManos e um projeto de jogo multiplayer dividido em quatro areas principais:
+BomberManos e um projeto de jogo multiplayer baseado em partidas.
 
-- `client/`: interface React + Vite + Tailwind
-- `server/`: login, sessao, matchmaking e game loop atual
-- `gameserver/`: extracao futura do backend de jogo, ainda incompleta
-- `game/`: prototipo standalone do motor/renderizacao
+Arquiteturalmente, o sistema caminha para duas camadas complementares:
 
-Hoje, a pilha principal em funcionamento e `client + server`. Os diretorios `gameserver/` e `game/` existem, mas ainda nao representam o fluxo principal de producao local.
+- plataforma: autenticacao, sessao, matchmaking e persistencia duravel;
+- partida em tempo real: cada partida como um micro universo com seu proprio estado e sua propria fonte de verdade.
+
+No desenho alvo do projeto:
+
+- `client/`: app web principal para entrada, conta e fluxo fora da simulacao;
+- `server/`: camada de plataforma e orquestracao;
+- `game/`: frontend especializado da partida;
+- `gameserver/`: backend especializado da partida;
+- `sql/`: schema e bootstrap da persistencia permanente em Postgres.
+
+Hoje, porem, o fluxo realmente funcional ainda esta concentrado em `client + server`. A extracao completa da camada de jogo em tempo real ainda esta em andamento.
+
+## Arquitetura em uma leitura rapida
+
+```mermaid
+flowchart LR
+  user[Usuario] --> client[client]
+  client -->|HTTP/API| server[server]
+  server <--> postgres[(Postgres)]
+  client -->|entra na partida| game[game]
+  game <-->|tempo real| gameserver[gameserver]
+```
+
+Leitura correta desse diagrama:
+
+- ele representa a arquitetura alvo;
+- o caminho ativo hoje ainda nao usa `game/` e `gameserver/` como pipeline principal da partida;
+- o runtime atual ainda executa matchmaking e game loop dentro de `server/`.
 
 ## Status atual
 
 - O `server/` serve o build do `client/` e tambem expoe HTTP, HTTPS e Socket.IO.
-- O estado de usuarios, sessoes e partidas ainda depende fortemente do banco em arquivos em `server/data/`.
-- O `gameserver/` esta mais proximo de um scaffold do que de um servico pronto.
-- O schema SQL em `sql/` ajuda a subir Postgres, mas nao reflete 100% do fluxo realmente usado pelo backend atual.
+- O estado ativo de usuarios, sessoes e partidas ainda depende fortemente de arquivos locais em `server/data/` e de memoria de processo.
+- O `gameserver/` ja sobe como servico separado, mas seus handlers ainda estao essencialmente vazios.
+- O `game/` ja materializa um cliente de partida em canvas, mas ainda esta fora do fluxo principal do produto.
+- O schema SQL em `sql/` e o Postgres do `docker-compose.yml` representam a persistencia duravel pretendida, embora ainda nao sejam a fonte principal de verdade do runtime.
 
 ## Estrutura do repositorio
 
 ```text
 .
-|- client/      Frontend React
-|- server/      Backend principal e servidor Socket.IO
-|- gameserver/  Backend de jogo em extracao
-|- game/        Prototipo standalone do motor
+|- client/      App web principal
+|- server/      Plataforma atual + game loop atual
+|- gameserver/  Backend de jogo dedicado em evolucao
+|- game/        Frontend de jogo dedicado em prototipo
 |- sql/         Bootstrap e schema de Postgres
 |- docs/        Documentacao para humanos
 |- .opencode/   Skills locais para OpenCode
 |- AGENTS.md    Regras de projeto para agentes
 |- opencode.json
 ```
+
+## Como pensar o sistema hoje
+
+### Plataforma
+
+Cuida de:
+
+- conta e autenticacao;
+- sessao;
+- matchmaking;
+- descoberta ou alocacao de partida;
+- persistencia permanente.
+
+### Partida
+
+Cuida de:
+
+- estado vivo do mapa;
+- jogadores conectados;
+- sincronizacao em tempo real;
+- regras da simulacao;
+- resultado da partida.
+
+### Diferenca entre alvo e implementacao atual
+
+- Arquitetura alvo: `server` e `gameserver` separados por responsabilidade.
+- Implementacao atual: `server` ainda concentra plataforma e simulacao principal.
+- Arquitetura alvo: Postgres como persistencia permanente.
+- Implementacao atual: `server/data/` ainda e a persistencia principal do runtime.
+- Arquitetura alvo: `game` conversa com `gameserver` como frontend especializado da partida.
+- Implementacao atual: `client` conversa com `server`, e `game` segue como prototipo separado.
 
 ## Setup rapido
 
@@ -44,18 +101,24 @@ Hoje, a pilha principal em funcionamento e `client + server`. Os diretorios `gam
 npm run install
 ```
 
-### Subir Redis e Postgres
+### Subir Redis, Postgres e SeaweedFS
 
 ```bash
 docker compose up -d
 ```
 
-O compose sobe Redis Stack e Postgres 16 Alpine. O schema do banco e inicializado automaticamente via `sql/constructor.sql`.
+O compose sobe Redis Stack, Postgres 16 Alpine e SeaweedFS (object storage S3-compatible). O schema do banco e inicializado automaticamente via `sql/constructor.sql`.
 
 A conexao padrao do Postgres e:
 
 ```bash
 postgres://postgres@localhost/bombermanos
+```
+
+O endpoint S3 do SeaweedFS:
+
+```bash
+http://localhost:8333
 ```
 
 ### Variaveis de ambiente
@@ -75,6 +138,9 @@ Variaveis:
 | `POSTGRES` | — | String de conexao Postgres |
 | `SESSION_SECRET` | `jacareperneta` | Segredo da sessao (troque em producao) |
 | `CORS_ORIGINS` | — | Origins CORS separados por virgula |
+| `SEAWEEDFS_S3_ENDPOINT` | `http://localhost:8333` | Endpoint S3 do SeaweedFS |
+| `SEAWEEDFS_ACCESS_KEY` | `admin` | Chave de acesso do SeaweedFS |
+| `SEAWEEDFS_SECRET_KEY` | `secret` | Chave secreta do SeaweedFS |
 
 ## Fluxos de execucao
 
@@ -133,7 +199,8 @@ Acesse **`http://localhost:5173`** — Vite com HMR + proxy para o backend.
 
 ## Documentacao
 
-- `docs/architecture.md`: arquitetura, limites de responsabilidade e fluxos
+- `docs/architecture.md`: arquitetura alvo, estado atual, limites de responsabilidade e ciclo de vida da partida
+- `docs/transformation-plan.md`: plano tecnico para sair da codebase atual e chegar na arquitetura alvo
 - `docs/development.md`: setup local, comandos e caveats
 - `docs/opencode.md`: como usar OpenCode neste repositorio
 - `AGENTS.md`: instrucoes de alto nivel para agentes
@@ -161,4 +228,6 @@ As escolhas acima seguem a documentacao oficial:
 - Certificados TLS de desenvolvimento versionados
 - Schema SQL referencia `characters(id)` sem a tabela existir
 - `SESSION_SECRET` tem fallback fixo (`jacareperneta`) — configure via `.env` em producao
-- Persistencia ativa e em arquivos JSON (`server/data/`), nao em Postgres
+- Persistencia ativa do runtime ainda e em arquivos JSON (`server/data/`), nao em Postgres
+- `gameserver/` e `game/` ja apontam a arquitetura futura, mas ainda nao substituem o fluxo principal atual
+- Object storage e SeaweedFS (S3-compatible) — MinIO foi arquivado e nao deve ser usado em projetos novos

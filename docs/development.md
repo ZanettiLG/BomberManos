@@ -17,12 +17,15 @@
 | Redis | 6379 | Docker Compose |
 | Redis Insight | 8001 | Docker Compose |
 | Postgres | 5432 | Docker Compose |
+| SeaweedFS S3 | 8333 | Docker Compose |
+| SeaweedFS Master | 9333 | Docker Compose |
+| SeaweedFS Filer | 8888 | Docker Compose |
 
 ## Infra local
 
 ### Docker Compose
 
-Sobe Redis Stack e Postgres 16 Alpine com init automatico do schema:
+Sobe Redis Stack, Postgres 16 Alpine e SeaweedFS com init automatico do schema:
 
 ```bash
 docker compose up -d
@@ -48,6 +51,9 @@ cp .env.example .env
 | `POSTGRES` | — | `server` e `gameserver` |
 | `SESSION_SECRET` | `jacareperneta` | `server` — sessao |
 | `CORS_ORIGINS` | `localhost:3000,5173` | `server` e `gameserver` |
+| `SEAWEEDFS_S3_ENDPOINT` | `http://localhost:8333` | `server` e `gameserver` |
+| `SEAWEEDFS_ACCESS_KEY` | `admin` | `server` e `gameserver` |
+| `SEAWEEDFS_SECRET_KEY` | `secret` | `server` e `gameserver` |
 
 ## Instalacao
 
@@ -199,3 +205,4 @@ Se uma mudanca altera contratos entre frontend e backend, rode pelo menos os bui
 - Eventos Socket.IO sao strings soltas com `as any`, sem contrato type-safe
 - Certificados TLS de desenvolvimento versionados
 - `SESSION_SECRET` tem fallback fixo — configure `.env` em producao
+- SeaweedFS substitui MinIO (arquivado em 2026) — S3 endpoint local em `localhost:8333`

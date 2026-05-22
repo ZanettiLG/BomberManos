@@ -21,5 +21,20 @@ services:
       - ./sql/constructor.sql:/docker-entrypoint-initdb.d/01-constructor.sql
       - ./sql/views.sql:/docker-entrypoint-initdb.d/02-views.sql
 
+  seaweedfs:
+    container_name: seaweedfs
+    image: chrislusf/seaweedfs:latest
+    ports:
+      - "8333:8333"
+      - "9333:9333"
+      - "8888:8888"
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: secret
+    volumes:
+      - seaweedfs-data:/data
+    command: server -dir=/data -s3
+
 volumes:
   postgres-data:
+  seaweedfs-data:

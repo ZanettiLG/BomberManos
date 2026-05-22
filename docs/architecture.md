@@ -2,232 +2,331 @@
 
 ## Visao geral
 
-O repositorio contem **4 aplicacoes** que evoluíram em fases diferentes do projeto:
+O sistema deve ser entendido em duas camadas arquiteturais:
 
-| App | Papel | Status | Stack |
-|-----|-------|--------|-------|
-| `client/` | Frontend web | **Ativo** | React + Vite + Tailwind |
-| `server/` | Backend HTTP + Socket.IO | **Ativo** | Express + Socket.IO + banco em arquivos |
-| `gameserver/` | Extracao futura do backend de jogo | **Scaffold** | Express + Socket.IO (handlers vazios) |
-| `game/` | Prototipo standalone do motor | **Standalone** | TypeScript + Webpack + WebSocket nativo |
+- a camada de plataforma, responsavel por identidade, persistencia e ciclo de vida das partidas;
+- a camada de jogo em tempo real, onde cada partida tende a funcionar como um micro universo com sua propria fonte de verdade.
 
-**Fluxo principal hoje:** `client/` + `server/`. Os outros dois sao experimentais ou planejados.
+No desenho pretendido do projeto:
 
----
+- `game/` representa o frontend especializado do jogo em tempo real;
+- `gameserver/` representa o backend especializado do jogo em tempo real;
+- `server/` representa a camada de aplicacao e plataforma fora da simulacao da partida;
+- `sql/` e Postgres representam a persistencia permanente;
+- `client/` representa a interface web principal hoje usada para login, home, matchmaking e entrada na partida.
 
-## Mapa de portas
+Ao mesmo tempo, o repositorio ainda esta em transicao. O runtime realmente implementado hoje continua concentrado em `client + server`, e a parte de regras do jogo ainda esta inicial.
 
-| Servico | Porta HTTP | Porta HTTPS | Configuracao |
-|---------|-----------|-------------|--------------|
-| `server` | `PORT` (padrao 3000) | `PORT + 1` (padrao 3001) | `server/src/config/index.ts` |
-| `gameserver` | `PORT` (padrao 3000) | `PORT + 1` (padrao 3001) | `gameserver/src/config/index.ts` |
-| `client` (Vite dev) | 5173 | -- | `client/vite.config.ts` (sem proxy) |
-| `client` (build) | Servido pelo `server` | -- | `server/src/index.ts` serve `../client/build` |
-| `game` (webpack dev) | 8080 (padrao webpack) | -- | `game/webpack.config.js` |
-| Redis | 6379 | -- | `docker-compose.yml` |
-| Redis Insight | 8001 | -- | `docker-compose.yml` |
-| Postgres | 5432 | -- | `docker-compose.yml` |
+## Arquitetura alvo
 
-**Conflito conhecido:** `server` e `gameserver` padrao para 3000. Use `PORT=3000` para um e `PORT=4000` para o outro.
+```mermaid
+flowchart LR
+  user[Usuario]
 
----
+  subgraph platform[Camada de plataforma]
+    client[client\nApp web principal]
+    server[server\nAuth, sessao, matchmaking\ne orquestracao]
+    postgres[(Postgres\nDados permanentes)]
+  end
 
-## Conexoes entre apps
+  subgraph match_universe[Camada de partida em tempo real]
+    game[game\nFrontend do jogo]
+    gameserver[gameserver\nBackend do jogo]
+  end
 
-```
-┌──────────┐   HTTP (fetch) relative   ┌──────────┐
-│          │ ──────────────────────────▶ │          │
-│  client  │   Socket.IO (same-origin)   │  server  │
-│  (React) │ ◀────────────────────────── │ (Express)│
-│          │   Static files (client/build)│          │
-└──────────┘                             └──────────┘
-                                              │
-                                         (sem conexao)
-                                              │
-                                         ┌────┴─────┐
-                                         │gameserver │
-                                         │(scaffold) │
-                                         └──────────┘
-
-┌──────────┐
-│   game   │   WebSocket nativo → porta 5000 (fora do projeto)
-│(prototipo)│   Sem conexao com client, server ou gameserver
-└──────────┘
+  user --> client
+  client -->|HTTP/API| server
+  server <--> postgres
+  client -->|entra na partida| game
+  game <-->|tempo real| gameserver
+  server -. cria, aloca ou referencia partida .- gameserver
+  server -. persiste metadados e resultados .- postgres
 ```
 
-**Nao existem** conexoes entre `server` e `gameserver`, `client` e `gameserver`, ou `game` e qualquer outro app. Nao ha pacote `shared/` ou `common/` — modelos sao duplicados entre `client/` e `server/`.
+## Estado atual no repositorio
 
----
+```mermaid
+flowchart LR
+  user[Usuario no navegador]
 
-## Componentes
+  subgraph current[Fluxo realmente ativo hoje]
+    client[client\nReact + Vite + Tailwind]
+    server[server\nExpress + Socket.IO\nmatchmaking + game loop]
+    files[(server/data\nJSON files)]
+  end
 
-### `client/`
+  subgraph planned[Partes previstas ou incompletas]
+    gameserver[gameserver\nScaffold de servico]
+    game[game\nPrototipo standalone]
+    postgres[(sql + Postgres\nInfra de persistencia)]
+  end
 
-Frontend React. Conecta-se ao `server/` exclusivamente.
+  user --> client
+  client -->|HTTP /user e /match| server
+  client <-->|Socket.IO| server
+  server <--> files
+  server -. cliente Postgres existe, mas nao domina o runtime .- postgres
+  game -. WebSocket nativo para porta 5000 externa .- external[Servidor externo fora do fluxo atual]
+  gameserver -. sem integracao real hoje .- server
+```
 
-- `src/pages/`: orquestracao de telas
-- `src/components/`: UI reutilizavel e renderer canvas (`Game.ts`)
-- `src/services/`: chamadas HTTP via `fetch` com URLs **relativas** e `credentials: 'same-origin'`
-- `src/models/`: contratos de dados (duplicados do server)
-- `src/libs/`: helpers de formulario e input
+## Principio central do dominio
 
-**Como se conecta:**
-- **HTTP:** URLs relativas (`/user/login`, `/user`, `/match/modes`) — sem URL base absoluta
-- **Socket.IO:** `io({ auth: { token: sessionId } })` sem URL explicita (same-origin)
-- **Nao tem** proxy Vite configurado, entao `npm run dev-vite` na porta 5173 nao encaminha ao backend
+O projeto visa um jogo multiplayer baseado em partidas. A unidade principal de execucao e a partida.
 
-### `server/`
+Cada partida deve evoluir para um micro universo isolado, com:
 
-Backend principal. Serve o frontend buildado, expoe API REST e Socket.IO.
+- estado proprio;
+- regras proprias em execucao;
+- sincronizacao em tempo real entre clientes conectados;
+- uma fonte de verdade concentrada no backend da partida.
 
-- `src/router/`: rotas `/user/*` e `/match/*`
-- `src/controllers/`: handlers HTTP
-- `src/services/`: regras de negocio (user, match, game)
-- `src/connection/`: eventos Socket.IO
-- `src/database/`: persistencia em arquivos (`server/data/`)
-- `src/config/`: portas, certificados, sessao, CORS
+Nesse modelo, a fonte de verdade da simulacao nao deve ficar na camada de plataforma, mas no par `game/` e `gameserver/`.
 
-**O que serve:**
-- **Static files:** `express.static('../client/build')` — o frontend buildado
-- **HTTP:** rotas de usuario e match
-- **Socket.IO:** matchmaking e game loop
+## Separacao de responsabilidades
+
+### Plataforma
+
+A camada de plataforma cuida do que existe antes, durante e depois da partida, mas nao da simulacao em si.
+
+Responsabilidades esperadas:
+
+- autenticacao;
+- sessao;
+- cadastro de usuario;
+- matchmaking;
+- descoberta ou alocacao da partida;
+- persistencia duravel de dados de conta, progresso, inventario e historico;
+- consolidacao de resultados permanentes.
+
+No repositorio, esse papel aparece principalmente em `server/`, com apoio de `sql/` como base de persistencia planejada.
+
+### Partida em tempo real
+
+A camada de partida cuida do universo vivo do jogo.
+
+Responsabilidades esperadas:
+
+- estado corrente do mapa;
+- jogadores conectados naquela partida;
+- objetos dinamicos e eventos do jogo;
+- sincronizacao em tempo real;
+- regras do jogo e resolucao de conflitos;
+- encerramento da partida e emissao do resultado.
+
+No desenho pretendido:
+
+- `game/` e o frontend especializado da partida;
+- `gameserver/` e o backend especializado da partida.
+
+## Papel de cada pasta
+
+| Pasta | Papel arquitetural alvo | Estado verificado hoje |
+| --- | --- | --- |
+| `client/` | Portal/app web principal fora da simulacao | Ativo; faz login, home, matchmaking e renderiza o jogo atual via `server/` |
+| `server/` | Plataforma e orquestracao fora da partida | Ativo; ainda concentra auth, sessao, matchmaking e tambem o game loop atual |
+| `gameserver/` | Backend especializado por partida | Existe, sobe Express + Socket.IO, mas os handlers ainda estao vazios |
+| `game/` | Frontend especializado do jogo em tempo real | Existe como prototipo standalone com canvas e WebSocket nativo |
+| `sql/` | Modelo relacional e bootstrap da persistencia duravel | Existe; schema inicial montado no Postgres via Docker/manual |
+
+## Verificacao no codebase
 
 ### `gameserver/`
 
-Scaffold para extracao futura do backend de jogo.
+O codebase confirma a direcao de separacao do backend de jogo, mas ainda nao a implementacao completa:
 
-- `src/connection/index.ts`: handler de conexao **vazio** — nenhum evento registrado
-- `src/router/index.ts`: **vazio** — nenhuma rota implementada
-- `src/clients/redis/`: arquivo existe mas **vazio**
-- `src/clients/postgres/`: referencia `postgres` config mas **nao usado**
-- `src/data/`: JSONs de config (`characters.json`, `skills.json`, etc.) — carregados mas **nao usados por codigo**
+- `gameserver/src/index.ts` sobe Express, CORS, HTTP/HTTPS e Socket.IO;
+- `gameserver/src/connection/index.ts` cria os servidores Socket.IO, mas o handler de `connection` esta vazio;
+- `gameserver/src/router/index.ts` segue sem fluxo real relevante;
+- `gameserver/src/clients/postgres/index.ts` mostra preparacao para acesso relacional;
+- `gameserver/src/clients/redis/` ainda esta vazio.
 
-Nao se conecta a nenhum outro app. Tratar como area experimental.
+Conclusao: a pasta sustenta a intencao arquitetural de um backend de jogo dedicado, mas ainda esta como scaffold.
 
 ### `game/`
 
-Prototipo standalone do motor, sem integracao com o resto do projeto.
+O codebase confirma a ideia de um frontend de jogo separado do app principal:
 
-- Usa **WebSocket nativo** (nao Socket.IO) apontando para `wss://<host>:5000` — porta que **nao existe** no repositorio
-- Canvas rendering com hierarquia de objetos (`GameObject`, `MapObject`, `SpriteSheet`)
-- Assets carregados de `/assets/tilemaps/` e `/data/`
-- Nao importa nada de `client/`, `server/` ou `gameserver/`
+- ha renderer em canvas;
+- ha hierarquia de objetos, sprites, mapas e input;
+- ha cliente WebSocket proprio em `game/src/connection/index.ts`.
 
----
+Ao mesmo tempo, ele ainda e prototipo:
 
-## Endpoints HTTP
+- usa WebSocket nativo, nao Socket.IO;
+- aponta para `wss://...:5000`, fora do fluxo principal do monorepo;
+- nao esta integrado ao `gameserver/` atual.
 
-### Usuario (`/user`)
+Conclusao: a pasta ja materializa a ideia de frontend de partida, mas ainda nao faz parte do caminho principal do produto.
 
-| Metodo | Rota | Controller | Descricao |
-|--------|------|-----------|-----------|
-| POST | `/user/login` | `controllers/user/login.ts` | Valida credenciais, cria sessao, seta cookie `token` |
-| POST | `/user/logout` | `controllers/user/logout.ts` | Destroi sessao, limpa cookie `token` |
-| POST | `/user/register` | `controllers/user/register.ts` | Cria novo usuario |
-| GET | `/user` | `controllers/user/info.ts` | Le cookie `token`, retorna user + sessionId |
+### `server/`
 
-### Match (`/match`)
+O codebase confirma que a camada de plataforma existe, mas tambem mostra que o jogo ainda nao foi extraido dela:
 
-| Metodo | Rota | Controller | Descricao |
-|--------|------|-----------|-----------|
-| GET | `/match/modes` | `controllers/match/modes.ts` | Retorna modos de jogo disponiveis |
-| GET | `/match/search` | `controllers/match/search.ts` | Retorna partida atual do usuario |
+- auth e sessao vivem aqui;
+- rotas `/user` e `/match` vivem aqui;
+- o build do `client/` e servido daqui;
+- matchmaking roda daqui;
+- o game loop atual ainda vive em `server/src/services/game/data.ts`.
 
----
+Conclusao: hoje `server/` e um backend monolitico de transicao, acumulando plataforma e simulacao da partida.
 
-## Eventos Socket.IO
+### `sql/` e Postgres
 
-### Client → Server
+O codebase confirma a intencao de persistencia real e permanente:
 
-| Evento | Disparado por | Arquivo |
-|--------|--------------|---------|
-| `match-search` | `GameRoom.tsx` ao conectar e nao estar em partida | `GameRoom.tsx:35` |
-| `match-confirm` | `MatchRoom.tsx` quando jogador confirma | `MatchRoom.tsx:26` |
-| `match-unconfirm` | `MatchRoom.tsx` quando jogador desconfirma | `MatchRoom.tsx:32` |
-| `player-started` | `Game.ts` quando canvas inicializa | `Game.ts:61` |
-| `player-move` | `Game.ts` quando jogador clica no mapa | `Game.ts:77` (comentado) |
+- `docker-compose.yml` sobe Postgres e monta `sql/constructor.sql` e `sql/views.sql`;
+- `sql/constructor.sql` modela usuarios, informacoes de usuario, partidas e relacoes de participacao;
+- existem clientes Postgres em `server/` e `gameserver/`.
 
-### Server → Client
+Mas o runtime principal ainda nao usa essa persistencia como fonte de verdade:
 
-| Evento | Proposito | Consumido por |
-|--------|-----------|---------------|
-| `check-playing` | Verifica se jogador ja esta em partida | `GameRoom.tsx:31` |
-| `match-update` | Estado da sala (jogadores, confirmacoes) | `GameRoom.tsx:42`, `MatchRoom.tsx:39` |
-| `match-starting` | Contagem regressiva | `MatchRoom.tsx:43` |
-| `match-start` | Partida iniciou (payload com dados do jogo) | `GameRoom.tsx:47` |
-| `game-ready` | Server confirma que jogador esta pronto | `Game.ts:63` |
-| `game-update` | Atualizacao periodica do estado do jogo | `Game.ts:67` |
+- `server/` ainda persiste usuarios e sessoes em arquivos JSON;
+- partidas ativas ainda vivem em memoria do processo.
 
-**Eventos nao sao type-safe:** O modelo `socket.ts` no client define tipos genericos com placeholders. Os eventos sao usados como strings com `as any`.
-
----
-
-## Game loop
-
-O game loop ativo esta **dentro do `server/`**, em `server/src/services/game/data.ts`:
-
-1. Quando uma partida inicia, `GameMatch` gera mapa aleatorio 11x11 com paredes e caixas
-2. Server emite `game-ready` + `game-update` periodicos
-3. `client/src/components/Game.ts` renderiza tiles e jogadores no canvas
-4. Pathfinding usa A* (stub) e `directPath`
-5. Jogadores movem-se por objetivos (clique no mapa)
-
----
+Conclusao: Postgres ja faz parte da arquitetura pretendida e da infraestrutura do repositorio, mas ainda nao domina o fluxo real executado hoje.
 
 ## Persistencia
 
-Existem **duas camadas nao alinhadas**:
+### Persistencia permanente pretendida
 
-| Camada | Local | Usada por | Status |
-|--------|-------|-----------|--------|
-| Arquivos JSON | `server/data/` | `server/src/database/index.ts` | **Runtime ativo** |
-| Postgres | `sql/constructor.sql` + `docker-compose.yml` | Clientes SQL instalados mas **nao usados** | Infraestrutura planejada |
+Os dados permanentes do sistema devem viver em Postgres, por exemplo:
 
-Uma mudanca no schema SQL **nao altera** o comportamento do backend atual.
+- usuarios;
+- perfis;
+- progresso;
+- inventario;
+- configuracoes duraveis;
+- historico e resultado consolidado das partidas.
 
----
+Essa separacao permite que a camada de plataforma escale de forma diferente da camada de partidas em tempo real.
 
-## CORS
+### Persistencia transiente da partida
 
-Ambos `server` e `gameserver` tem origins fixas identicas:
+O estado vivo de cada partida deve ficar no backend da partida durante sua execucao.
 
+Exemplos:
+
+- posicao de jogadores;
+- estado do mapa;
+- bombas, explosoes e destruicao;
+- temporizadores;
+- eventos em tempo real;
+- estado intermediario nao duravel.
+
+Esse estado pode ser descartavel ao final da partida, restando apenas a persistencia do resultado necessario.
+
+### Persistencia realmente usada hoje
+
+Hoje o repositorio ainda esta em um estagio intermediario:
+
+- `server/data/` e a persistencia principal em runtime;
+- `server/src/database/index.ts` opera sobre arquivos locais;
+- Postgres esta preparado, mas nao e o centro do fluxo ativo.
+
+## Escalabilidade pretendida
+
+O desenho descrito sugere duas estrategias diferentes de escala:
+
+- a camada de plataforma pode escalar em torno de HTTP, sessao, persistencia e operacoes duraveis;
+- a camada de partidas pode escalar em torno de muitas simulacoes concorrentes, com trafego intenso e estado em tempo real por partida.
+
+Arquiteturalmente, isso favorece tratar cada partida como uma unidade isolavel de processamento.
+
+Hoje, porem, essa separacao ainda nao foi concluida, porque o game loop ativo segue em `server/`.
+
+## Fluxo conceitual de uma partida
+
+```mermaid
+flowchart TB
+  A[Usuario autentica] --> B[Plataforma encontra ou cria contexto de partida]
+  B --> C[Jogador entra no universo da partida]
+  C --> D[gameserver passa a ser fonte de verdade do estado]
+  D --> E[game sincroniza renderizacao e input em tempo real]
+  E --> F[Partida termina]
+  F --> G[Resultado consolidado e persistido no Postgres]
 ```
-http://localhost:8000
-http://localhost:5173
-http://127.0.0.1:8000
-http://127.0.0.1:5173
-http://192.168.0.113:8000
+
+## Ciclo de vida detalhado de uma partida
+
+```mermaid
+flowchart LR
+  A[Login e sessao] --> B[Matchmaking na plataforma]
+  B --> C[Plataforma cria ou seleciona uma partida]
+  C --> D[Jogador recebe referencia da partida]
+  D --> E[Cliente da partida conecta no gameserver]
+  E --> F[gameserver inicializa ou restaura o estado vivo]
+  F --> G[Loop de simulacao em tempo real]
+  G --> H[Eventos, movimentos e regras da partida]
+  H --> I[Broadcast de estado para jogadores conectados]
+  I --> G
+  G --> J[Fim da partida]
+  J --> K[Consolidacao de resultado]
+  K --> L[Persistencia duravel no Postgres]
 ```
 
-- **5173** = Vite dev server
-- **8000** = porta historica (provavelmente producao anterior)
-- Porta 3000 nao esta na lista — funciona porque `client` e servido do mesmo origin via static files
+Leitura desse ciclo:
 
----
+- a plataforma e dona do acesso, da sessao e do matchmaking;
+- o `gameserver` deve se tornar dono do estado vivo da partida;
+- o `game` deve consumir esse estado em tempo real e refletir input do jogador;
+- ao final, apenas o resultado necessario volta para a persistencia duravel.
 
-## Modelos compartilhados (duplicados)
+## Implementacao atual desse fluxo
 
-| Contrato | `client/src/models/` | `server/src/models/` |
-|----------|---------------------|---------------------|
-| IUser | `User.ts` | `user.ts` |
-| Session | — | `session.ts` |
-| IMatchSetup | `match-setup.ts` | `match-setup.ts` |
-| IMatchPlayer | `match-player.ts` | `match-player.ts` |
-| IMatchType | `match-type.ts` | `match-type.ts` |
-| IGameSetup | `game-setup.ts` (vazio) | `game-setup.ts` (vazio) |
-| APIResponse | `APIResponse.ts` | `response.ts` |
+Hoje esse fluxo ainda esta comprimido:
 
-Nao ha pacote compartilhado. Alterar um contrato exige editar os dois lados.
+- autenticacao, matchmaking e simulacao ainda passam por `server/`;
+- `client/` conversa com `server/` por HTTP e Socket.IO;
+- `game/` e `gameserver/` ainda nao formam o pipeline ativo de uma partida real.
 
----
+## Estado das regras do jogo
 
-## Riscos conhecidos
+As regras do jogo ainda estao em formacao.
 
-- Segredo de sessao fixo em `server/src/config/index.ts`
-- Certificados TLS de desenvolvimento versionados
-- CORS com origins fixas e desatualizadas
-- Schema SQL referencia `characters(id)` sem a tabela existir
-- `gameserver/` e `server/` competem pela porta 3000 por padrao
-- Eventos Socket.IO nao tem contratos type-safe
-- Game loop roda dentro do server, dificultando extracao futura
-- `game/` aponta para servidor externo (porta 5000) que nao existe no projeto
+O objetivo do projeto e evoluir para um jogo no estilo Bomberman, mas isso ainda nao esta consolidado no codebase atual.
+
+Hoje ja existem sinais iniciais de simulacao, como:
+
+- mapa com tiles e blocos;
+- objetos e personagens;
+- movimentacao;
+- estruturas de partida e jogadores.
+
+Mas ainda faltam as regras centrais que definem claramente o jogo, como por exemplo:
+
+- bombas;
+- explosoes;
+- destruicao de blocos;
+- power-ups;
+- regras de vitoria e derrota;
+- ritmo completo da partida;
+- consistencia entre frontend e backend da simulacao.
+
+## Tensao arquitetural atual
+
+O repositorio guarda ao mesmo tempo:
+
+- a arquitetura desejada, com plataforma separada da simulacao por partida;
+- a implementacao atual, ainda monolitica no `server/` para o fluxo principal;
+- experimentos e scaffolds que apontam para a futura extracao.
+
+Isso significa que a documentacao correta hoje precisa sempre distinguir:
+
+- o que ja esta operando;
+- o que ja esta representado em codigo, mas incompleto;
+- o que ainda e direcao de produto e arquitetura.
+
+## Proxima leitura recomendada da arquitetura
+
+Se alguem entrar neste repositorio hoje, a leitura mais fiel e:
+
+1. o produto funcional atual e `client + server`;
+2. a arquitetura alvo aponta para separar plataforma e partida em tempo real;
+3. `game/` e `gameserver/` sao a base dessa separacao futura;
+4. Postgres e a persistencia duravel pretendida, embora o runtime principal ainda use arquivos locais;
+5. o jogo final estilo Bomberman ainda esta em construcao no nivel de regras.
+
+## Nota sobre Mermaid neste arquivo
+
+Os diagramas acima usam a forma recomendada pela documentacao atual do Mermaid em Markdown: bloco fenced com identificador `mermaid`, seguido da declaracao do tipo de diagrama, como `flowchart LR` ou `flowchart TB`.
